@@ -28,8 +28,11 @@ API: POST {api}/api/v1/services/aigc/multimodal-generation/generation
 
 from __future__ import annotations
 
+import base64
 import logging
+import mimetypes
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from agent.image_gen_provider import (
@@ -71,6 +74,44 @@ _MODELS = [
 # Defaults when config keys are absent.
 _DEFAULT_API = "https://token-plan.ap-southeast-1.maas.aliyuncs.com"
 _DEFAULT_KEY_ENV = "QWEN_API_KEY"
+
+# Max file size for base64 inline encoding (10 MB).
+_MAX_INLINE_BYTES = 10 * 1024 * 1024
+
+
+def _to_data_uri(path: str) -> str:
+    """Convert a local image file to a base64 data URI for the API.
+
+    DashScope accepts data URIs in the ``image`` field of multimodal
+    messages.  Local paths (absolute or relative) are detected and
+    converted automatically so callers can pass file paths directly.
+
+    Raises ``ValueError`` for missing files or unsupported sizes.
+    """
+    p = Path(path).expanduser()
+    if not p.is_file():
+        raise ValueError(f"Image file not found: {path}")
+    if p.stat().st_size > _MAX_INLINE_BYTES:
+        raise ValueError(
+            f"Image too large for inline encoding ({p.stat().st_size} bytes, "
+            f"max {_MAX_INLINE_BYTES}). Use a URL instead."
+        )
+    mime, _ = mimetypes.guess_type(str(p))
+    if not mime or not mime.startswith("image/"):
+        mime = "image/png"  # safe fallback
+    b64 = base64.b64encode(p.read_bytes()).decode("ascii")
+    return f"data:{mime};base64,{b64}"
+
+
+def _normalize_source(src: str) -> str:
+    """Return a URL or data URI suitable for the DashScope API.
+
+    - http/https URLs and data URIs pass through unchanged.
+    - Local file paths are converted to base64 data URIs.
+    """
+    if src.startswith(("http://", "https://", "data:")):
+        return src
+    return _to_data_uri(src)
 
 
 def _load_config() -> Dict[str, Any]:
@@ -192,8 +233,11 @@ class DashScopeImageGenProvider(ImageGenProvider):
         # Determine modality from source images
         sources: List[str] = []
         if image_url:
-            sources.append(image_url)
-        sources.extend(normalize_reference_images(reference_image_urls) or [])
+            sources.append(_normalize_source(image_url))
+        sources.extend(
+            _normalize_source(s)
+            for s in (normalize_reference_images(reference_image_urls) or [])
+        )
         modality = "image" if sources else "text"
 
         # Image-to-image requires the pro model

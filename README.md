@@ -4,6 +4,12 @@ Image generation plugin for [Hermes Agent](https://github.com/NousResearch/herme
 
 Brings Alibaba's Wan 2.7 image models to Hermes's `image_generate` tool. Works with both token plan keys (`sk-sp-*`) and pay-as-you-go keys (`sk-ws-*`).
 
+## Example
+
+Image-to-image generation with `wan2.7-image-pro` -- anime character placed into a cyberpunk cityscape with Qwen neon signage:
+
+![Cyberpunk Qwen](examples/cyberpunk-qwen.png)
+
 ## Models
 
 | Model | Strengths |
@@ -63,6 +69,7 @@ Once configured, Hermes's `image_generate` tool routes through DashScope automat
 
 - **Text-to-image**: just provide a prompt
 - **Image-to-image**: provide `image_url` (auto-upgrades to wan2.7-image-pro)
+  - Accepts URLs (`https://...`), data URIs (`data:image/png;base64,...`), or local file paths (`/path/to/image.png`) -- local files are automatically base64-encoded inline
 
 Generated images are cached locally under `$HERMES_HOME/cache/images/` since DashScope OSS URLs expire after ~24 hours.
 
