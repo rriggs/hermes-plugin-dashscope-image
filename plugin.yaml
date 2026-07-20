@@ -1,0 +1,7 @@
+name: dashscope
+version: 1.0.0
+description: "DashScope (Qwen Cloud) image generation -- Wan 2.7 models via Alibaba Cloud Model Studio. Works with token plan (sk-sp-*) and PAYG (sk-ws-*) keys."
+author: Sven (Mobilinkd)
+kind: backend
+requires_env:
+  - QWEN_API_KEY
