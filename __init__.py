@@ -4,14 +4,26 @@ Exposes Alibaba Cloud Model Studio's Wan image models through the
 native DashScope multimodal-generation API as an ImageGenProvider.
 
 Works with both token-plan keys (sk-sp-*) and PAYG keys (sk-ws-*).
-Set DASHSCOPE_BASE_URL to override the endpoint (defaults to the
-Singapore token-plan endpoint).
 
-Models on the token plan:
-  - wan2.7-image:      Fast text-to-image
-  - wan2.7-image-pro:  Higher fidelity, supports image-to-image editing
+Configuration (config.yaml):
 
-API: POST {base}/api/v1/services/aigc/multimodal-generation/generation
+    image_gen:
+      provider: dashscope
+      dashscope:
+        api: https://token-plan.ap-southeast-1.maas.aliyuncs.com
+        key_env: QWEN_API_KEY
+        model: wan2.7-image          # optional default model
+
+All keys are optional. Defaults:
+  - api:     https://token-plan.ap-southeast-1.maas.aliyuncs.com
+  - key_env: QWEN_API_KEY
+  - model:   wan2.7-image
+
+For PAYG users:
+  - api:     https://dashscope-intl.aliyuncs.com
+  - key_env: DASHSCOPE_API_KEY
+
+API: POST {api}/api/v1/services/aigc/multimodal-generation/generation
 """
 
 from __future__ import annotations
@@ -56,17 +68,12 @@ _MODELS = [
     },
 ]
 
-# Default base URL -- Singapore token plan endpoint.
-# Override with DASHSCOPE_BASE_URL for PAYG (https://dashscope-intl.aliyuncs.com)
-# or China region (https://dashscope.aliyuncs.com).
-_DEFAULT_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com"
+# Defaults when config keys are absent.
+_DEFAULT_API = "https://token-plan.ap-southeast-1.maas.aliyuncs.com"
+_DEFAULT_KEY_ENV = "QWEN_API_KEY"
 
 
-def _base_url() -> str:
-    return os.environ.get("DASHSCOPE_BASE_URL", "").strip() or _DEFAULT_BASE_URL
-
-
-def _load_dashscope_image_config() -> Dict[str, Any]:
+def _load_config() -> Dict[str, Any]:
     """Read ``image_gen.dashscope`` from config.yaml."""
     try:
         from hermes_cli.config import load_config
@@ -78,6 +85,22 @@ def _load_dashscope_image_config() -> Dict[str, Any]:
     except Exception as exc:
         logger.debug("Could not load image_gen.dashscope config: %s", exc)
         return {}
+
+
+def _resolve_api(cfg: Dict[str, Any]) -> str:
+    """Resolve the API base URL: config > default."""
+    api = cfg.get("api", "")
+    if isinstance(api, str) and api.strip():
+        return api.strip().rstrip("/")
+    return _DEFAULT_API
+
+
+def _resolve_key_env(cfg: Dict[str, Any]) -> str:
+    """Resolve the env var name holding the API key: config > default."""
+    key_env = cfg.get("key_env", "")
+    if isinstance(key_env, str) and key_env.strip():
+        return key_env.strip()
+    return _DEFAULT_KEY_ENV
 
 
 class DashScopeImageGenProvider(ImageGenProvider):
@@ -97,7 +120,9 @@ class DashScopeImageGenProvider(ImageGenProvider):
         return "DashScope (Qwen Cloud)"
 
     def is_available(self) -> bool:
-        return bool(os.environ.get("QWEN_API_KEY", "").strip())
+        cfg = _load_config()
+        key_env = _resolve_key_env(cfg)
+        return bool(os.environ.get(key_env, "").strip())
 
     def list_models(self) -> List[Dict[str, Any]]:
         return list(_MODELS)
@@ -106,8 +131,6 @@ class DashScopeImageGenProvider(ImageGenProvider):
         return "wan2.7-image"
 
     def capabilities(self) -> Dict[str, Any]:
-        # wan2.7-image-pro supports image-to-image editing via
-        # reference images in the messages content array.
         return {"modalities": ["text", "image"], "max_reference_images": 1}
 
     def get_setup_schema(self) -> Dict[str, Any]:
@@ -118,7 +141,7 @@ class DashScopeImageGenProvider(ImageGenProvider):
             "env_vars": [
                 {
                     "key": "QWEN_API_KEY",
-                    "prompt": "Qwen Cloud API key (sk-sp-* for token plan)",
+                    "prompt": "Qwen Cloud API key (sk-sp-* for token plan, sk-ws-* for PAYG)",
                     "url": "https://modelstudio.console.alibabacloud.com/",
                 },
             ],
@@ -144,12 +167,15 @@ class DashScopeImageGenProvider(ImageGenProvider):
                 aspect_ratio=aspect,
             )
 
-        api_key = os.environ.get("QWEN_API_KEY", "").strip()
+        cfg = _load_config()
+        key_env = _resolve_key_env(cfg)
+        api_key = os.environ.get(key_env, "").strip()
         if not api_key:
             return error_response(
                 error=(
-                    "QWEN_API_KEY not set. Run `hermes tools` -> Image "
-                    "Generation -> DashScope to configure."
+                    f"{key_env} not set. Configure image_gen.dashscope.key_env "
+                    f"in config.yaml and set the env var, or run `hermes tools` "
+                    f"-> Image Generation -> DashScope."
                 ),
                 error_type="auth_required",
                 provider=self.name,
@@ -157,10 +183,9 @@ class DashScopeImageGenProvider(ImageGenProvider):
             )
 
         # Model selection: explicit kwarg > config > default
-        ds_cfg = _load_dashscope_image_config()
         model_id = (
             kwargs.get("model")
-            or ds_cfg.get("model")
+            or cfg.get("model")
             or self.default_model()
         )
 
@@ -178,7 +203,6 @@ class DashScopeImageGenProvider(ImageGenProvider):
         size = _SIZES.get(aspect, _SIZES["square"])
 
         # Build the DashScope multimodal-generation request.
-        # Content array: source images first, then the text prompt.
         content: List[Dict[str, str]] = []
         for src in sources:
             content.append({"image": src})
@@ -194,7 +218,7 @@ class DashScopeImageGenProvider(ImageGenProvider):
             "parameters": {"size": size},
         }
 
-        base = _base_url().rstrip("/")
+        base = _resolve_api(cfg)
         url = f"{base}/api/v1/services/aigc/multimodal-generation/generation"
 
         try:
@@ -222,7 +246,7 @@ class DashScopeImageGenProvider(ImageGenProvider):
                 aspect_ratio=aspect,
             )
 
-        # Check for API-level errors (code field present and non-empty)
+        # Check for API-level errors
         if data.get("code"):
             return error_response(
                 error=f"DashScope error: {data['code']}: {data.get('message', '')}",
@@ -234,8 +258,6 @@ class DashScopeImageGenProvider(ImageGenProvider):
             )
 
         # Extract image URL from response.
-        # Shape: output.choices[0].message.content[] where each item
-        # is {"type": "image", "image": "<url>"} or just {"image": "<url>"}.
         image_ref: Optional[str] = None
         try:
             choices = data["output"]["choices"]
@@ -265,8 +287,7 @@ class DashScopeImageGenProvider(ImageGenProvider):
                 aspect_ratio=aspect,
             )
 
-        # Cache the image locally -- DashScope OSS URLs are ephemeral
-        # (signed with ~24h expiry).
+        # Cache the image locally -- DashScope OSS URLs are ephemeral.
         short = model_id.replace(".", "_")
         try:
             saved_path = save_url_image(image_ref, prefix=f"dashscope_{short}")

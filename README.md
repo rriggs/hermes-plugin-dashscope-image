@@ -11,7 +11,7 @@ Brings Alibaba's Wan 2.7 image models to Hermes's `image_generate` tool. Works w
 | `wan2.7-image` | Fast text-to-image (~5s) |
 | `wan2.7-image-pro` | Higher fidelity, image-to-image editing (~10s) |
 
-Both models are included in the Alibaba Cloud AI Token Plan subscription.
+Both models are included in the Alibaba Cloud AI Token Plan subscription and are available on the PAYG free tier.
 
 ## Install
 
@@ -22,26 +22,40 @@ hermes plugins enable dashscope
 
 ## Configure
 
-Set your API key in `~/.hermes/.env` (or your profile's `.env`):
+All configuration lives under `image_gen.dashscope` in `config.yaml`:
+
+```yaml
+image_gen:
+  provider: dashscope
+  dashscope:
+    api: https://token-plan.ap-southeast-1.maas.aliyuncs.com
+    key_env: QWEN_API_KEY
+    model: wan2.7-image          # optional
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `api` | `https://token-plan.ap-southeast-1.maas.aliyuncs.com` | DashScope API base URL |
+| `key_env` | `QWEN_API_KEY` | Name of the env var holding your API key |
+| `model` | `wan2.7-image` | Default model for generation |
+
+Set the API key in your `.env` file:
 
 ```bash
 QWEN_API_KEY=***
 ```
 
-Then set the provider:
+### PAYG users
 
-```bash
-hermes config set image_gen.provider dashscope
+```yaml
+image_gen:
+  provider: dashscope
+  dashscope:
+    api: https://dashscope-intl.aliyuncs.com
+    key_env: DASHSCOPE_API_KEY
 ```
 
-For PAYG users (non-token-plan), also set the base URL:
-
-```bash
-# In .env:
-DASHSCOPE_BASE_URL=https://dashscope-intl.aliyuncs.com
-```
-
-The default base URL points to the Singapore token plan endpoint.
+No env var names are hard-coded -- `key_env` tells the plugin which env var to read.
 
 ## Usage
 
@@ -57,7 +71,7 @@ Generated images are cached locally under `$HERMES_HOME/cache/images/` since Das
 This plugin uses the native DashScope multimodal-generation API:
 
 ```
-POST {base}/api/v1/services/aigc/multimodal-generation/generation
+POST {api}/api/v1/services/aigc/multimodal-generation/generation
 ```
 
 The OpenAI-compatible `/images/generations` endpoint is NOT used because the token plan endpoint does not serve image models on that path.
@@ -65,7 +79,7 @@ The OpenAI-compatible `/images/generations` endpoint is NOT used because the tok
 ## Requirements
 
 - Hermes Agent v0.18+
-- `QWEN_API_KEY` environment variable
+- API key set in the env var named by `key_env`
 - `requests` Python package (bundled with Hermes)
 
 ## License
